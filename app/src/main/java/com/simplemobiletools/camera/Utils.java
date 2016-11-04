@@ -137,4 +137,11 @@ public class Utils {
     public static boolean hasAudioPermission(Context cxt) {
         return ContextCompat.checkSelfPermission(cxt, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
     }
+
+    public static boolean hasLocationPermission(Context cxt) {
+        return ContextCompat.checkSelfPermission(cxt, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(cxt, Manifest.permission.ACCESS_COARSE_LOCATION)
+                        == PackageManager.PERMISSION_GRANTED;
+    }
 }

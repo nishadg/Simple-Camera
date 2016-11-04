@@ -3,6 +3,7 @@ package com.simplemobiletools.camera.activities;
 import android.Manifest;
 import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
@@ -14,13 +15,18 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.MediaStore;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.ActionBar;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.SurfaceView;
 import android.view.View;
@@ -47,16 +53,27 @@ import butterknife.BindView;
 import butterknife.ButterKnife;
 import butterknife.OnClick;
 
+import static android.content.Context.LOCATION_SERVICE;
+
 public class MainActivity extends SimpleActivity
-        implements SensorEventListener, PreviewListener, PhotoProcessor.MediaSavedListener, MediaScannerConnection.OnScanCompletedListener {
-    @BindView(R.id.view_holder) RelativeLayout mViewHolder;
-    @BindView(R.id.toggle_camera) ImageView mToggleCameraBtn;
-    @BindView(R.id.toggle_flash) ImageView mToggleFlashBtn;
-    @BindView(R.id.toggle_photo_video) ImageView mTogglePhotoVideoBtn;
-    @BindView(R.id.shutter) ImageView mShutterBtn;
-    @BindView(R.id.video_rec_curr_timer) TextView mRecCurrTimer;
-    @BindView(R.id.settings) View mSettingsBtn;
-    @BindView(R.id.last_photo_video_preview) ImageView mLastPhotoVideoPreview;
+        implements SensorEventListener, PreviewListener, PhotoProcessor.MediaSavedListener, MediaScannerConnection.OnScanCompletedListener,
+        LocationListener {
+    @BindView(R.id.view_holder)
+    RelativeLayout mViewHolder;
+    @BindView(R.id.toggle_camera)
+    ImageView mToggleCameraBtn;
+    @BindView(R.id.toggle_flash)
+    ImageView mToggleFlashBtn;
+    @BindView(R.id.toggle_photo_video)
+    ImageView mTogglePhotoVideoBtn;
+    @BindView(R.id.shutter)
+    ImageView mShutterBtn;
+    @BindView(R.id.video_rec_curr_timer)
+    TextView mRecCurrTimer;
+    @BindView(R.id.settings)
+    View mSettingsBtn;
+    @BindView(R.id.last_photo_video_preview)
+    ImageView mLastPhotoVideoPreview;
 
     private static final int CAMERA_STORAGE_PERMISSION = 1;
     private static final int AUDIO_PERMISSION = 2;
@@ -81,13 +98,38 @@ public class MainActivity extends SimpleActivity
     private static int mCurrCamera;
     private static int mLastHandledOrientation;
 
+
+    //**************************Code for accessing location**************************************//
+    private Context mContext;
+    // flag for GPS status
+    boolean isGPSEnabled = false;
+
+    // flag for network status
+    boolean isNetworkEnabled = false;
+
+    boolean canGetLocation = false;
+
+    Location location; // location
+    double latitude; // latitude
+    double longitude; // longitude
+
+    // The minimum distance to change Updates in meters
+    private static final long MIN_DISTANCE_CHANGE_FOR_UPDATES = 10; // 10 meters
+
+    // The minimum time between updates in milliseconds
+    private static final long MIN_TIME_BW_UPDATES = 1000 * 60 * 1; // 1 minute
+
+    // Declaring a Location Manager
+    protected LocationManager locationManager;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         tryInitCamera();
-
+        this.mContext = this;
+        getLocation();
         final ActionBar actionbar = getSupportActionBar();
         if (actionbar != null)
             actionbar.hide();
@@ -132,9 +174,15 @@ public class MainActivity extends SimpleActivity
             if (!Utils.hasStoragePermission(getApplicationContext())) {
                 permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
             }
+            if (!Utils.hasLocationPermission(getApplicationContext())) {
+                permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+                permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            }
             ActivityCompat.requestPermissions(this, permissions.toArray(new String[permissions.size()]), CAMERA_STORAGE_PERMISSION);
         }
     }
+
+
 
     private void handleIntent() {
         final Intent intent = getIntent();
@@ -662,6 +710,9 @@ public class MainActivity extends SimpleActivity
         setupPreviewImage(mIsInPhotoMode);
         if (mIsVideoCaptureIntent) {
             final Intent intent = new Intent();
+            double lat = getLatitude(), longitude = getLongitude();
+            intent.putExtra("LAT", lat);
+            intent.putExtra("LONG", longitude);
             intent.setData(uri);
             intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             setResult(RESULT_OK, intent);
@@ -680,9 +731,13 @@ public class MainActivity extends SimpleActivity
     public void mediaSaved(String path) {
         final String[] paths = {path};
         MediaScannerConnection.scanFile(getApplicationContext(), paths, null, this);
-
+        double lat = getLatitude(), longitude = getLongitude();
+        Intent data = new Intent();
+        data.putExtra("LAT", lat);
+        data.putExtra("LONG", longitude);
+        Log.d("LOACTION", lat + " " + longitude);
         if (mIsImageCaptureIntent) {
-            setResult(RESULT_OK);
+            setResult(RESULT_OK, data);
             finish();
         }
     }
@@ -695,8 +750,107 @@ public class MainActivity extends SimpleActivity
             mPreview.releaseCamera();
     }
 
+    public Location getLocation() {
+        try {
+            locationManager = (LocationManager) mContext
+                    .getSystemService(LOCATION_SERVICE);
+
+            // getting GPS status
+            isGPSEnabled = locationManager
+                    .isProviderEnabled(LocationManager.GPS_PROVIDER);
+
+            // getting network status
+            isNetworkEnabled = locationManager
+                    .isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+
+            if (!isGPSEnabled && !isNetworkEnabled) {
+                // no network provider is enabled
+            } else {
+                this.canGetLocation = true;
+                // First get location from Network Provider
+                if (isNetworkEnabled) {
+                    locationManager.requestLocationUpdates(
+                            LocationManager.NETWORK_PROVIDER,
+                            MIN_TIME_BW_UPDATES,
+                            MIN_DISTANCE_CHANGE_FOR_UPDATES, this);
+                    if (locationManager != null) {
+                        location = locationManager
+                                .getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                        if (location != null) {
+                            latitude = location.getLatitude();
+                            longitude = location.getLongitude();
+                        }
+                    }
+                }
+                // if GPS Enabled get lat/long using GPS Services
+                if (isGPSEnabled) {
+                    if (location == null) {
+                        locationManager.requestLocationUpdates(
+                                LocationManager.GPS_PROVIDER,
+                                MIN_TIME_BW_UPDATES,
+                                MIN_DISTANCE_CHANGE_FOR_UPDATES, this);
+                        if (locationManager != null) {
+                            location = locationManager
+                                    .getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                            if (location != null) {
+                                latitude = location.getLatitude();
+                                longitude = location.getLongitude();
+                            }
+                        }
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return location;
+    }
+
+    public double getLatitude(){
+        if(location != null){
+            latitude = location.getLatitude();
+        }
+
+        // return latitude
+        return latitude;
+    }
+
+    /**
+     * Function to get longitude
+     * */
+    public double getLongitude(){
+        if(location != null){
+            longitude = location.getLongitude();
+        }
+
+        // return longitude
+        return longitude;
+    }
+
     @Override
     public void onScanCompleted(String path, Uri uri) {
         setupPreviewImage(mIsInPhotoMode);
+    }
+
+    @Override
+    public void onLocationChanged(Location location) {
+
+    }
+
+    @Override
+    public void onStatusChanged(String provider, int status, Bundle extras) {
+
+    }
+
+    @Override
+    public void onProviderEnabled(String provider) {
+
+    }
+
+    @Override
+    public void onProviderDisabled(String provider) {
+
     }
 }
