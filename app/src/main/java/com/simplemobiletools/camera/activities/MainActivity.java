@@ -735,7 +735,6 @@ public class MainActivity extends SimpleActivity
         Intent data = new Intent();
         data.putExtra("LAT", lat);
         data.putExtra("LONG", longitude);
-        Log.d("LOACTION", lat + " " + longitude);
         if (mIsImageCaptureIntent) {
             setResult(RESULT_OK, data);
             finish();
@@ -801,6 +800,8 @@ public class MainActivity extends SimpleActivity
                 }
             }
 
+        } catch (SecurityException se){
+            se.printStackTrace();
         } catch (Exception e) {
             e.printStackTrace();
         }
